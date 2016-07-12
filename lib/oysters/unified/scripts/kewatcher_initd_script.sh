@@ -50,12 +50,11 @@ stop() {
   kill -s KILL `pgrep -xf "[r]esque-[0-9]+.*" | xargs` > /dev/null 2>&1
 
   if [ $RETVAL -eq 0 ]; then
-    echo_success
     rm -f $KEWATCHER_PIDFILE
   else
     echo "Resque KEWatcher is not running"
-    echo_failure
   fi
+  echo_success
 }
 
 case "$1" in

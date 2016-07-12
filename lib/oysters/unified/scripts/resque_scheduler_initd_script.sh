@@ -46,12 +46,11 @@ stop() {
   fi
 
   if [ $RETVAL -eq 0 ]; then
-    echo_success
     rm -f $SCHEDULER_PIDFILE
   else
     echo "Resque Scheduler is not running"
-    echo_failure
   fi
+  echo_success
 }
 
 case "$1" in
