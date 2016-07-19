@@ -15,42 +15,38 @@ start() {
 
   cd $ROOT_PATH
 
-  echo "Starting Resque Scheduler"
   options="RAILS_ENV=$RAILS_ENV VERBOSE=$SCHEDULER_VERBOSE BACKGROUND=$BACKGROUND DYNAMIC_SCHEDULE=$DYNAMIC_SCHEDULE PIDFILE=$SCHEDULER_PIDFILE"
   program="source /home/$APP_USER/.bash_profile; bundle exec rake resque:scheduler $options 2>&1 >> $SCHEDULER_LOGFILE"
 
-  if [[ $APP_USER == $USER ]]
-  then
-    daemon --pidfile=$SCHEDULER_PIDFILE $program
-  else
-    daemon --user $APP_USER --pidfile=$SCHEDULER_PIDFILE $program
-  fi
-  RETVAL=$?
+  action 'Starting Resque Scheduler...' daemon --user "${APP_USER#$USER}" --pidfile=$SCHEDULER_PIDFILE $program
 
-  if [ $RETVAL -eq 0 ]; then
-    echo_success
-  else
-    echo_failure
-  fi
-  echo
+  # workaround to allow Resque Scheduler to setup a trap for HUP signal
+  sleep 5
 }
 
 stop() {
-  echo "Stopping Resque Scheduler"
-
   if [ -f $SCHEDULER_PIDFILE ]; then
-    kill -s QUIT $(cat $SCHEDULER_PIDFILE)
-    RETVAL=$?
+    action 'Stopping Resque Scheduler...' _stop_with_wait $(cat $SCHEDULER_PIDFILE)
   else
-    RETVAL=1
+    echo 'Resque Scheduler is not running'
   fi
+}
 
-  if [ $RETVAL -eq 0 ]; then
-    rm -f $SCHEDULER_PIDFILE
-  else
-    echo "Resque Scheduler is not running"
-  fi
-  echo_success
+_stop_with_wait() {
+  local pid delay tries try
+
+  delay=2
+  tries=3
+  pid=$1
+  try=0
+
+  kill -s QUIT $pid
+
+  while [ $try -lt $tries ] ; do
+    checkpid $pid || return 0
+    sleep $delay
+    let try+=1
+  done
 }
 
 case "$1" in
@@ -59,7 +55,6 @@ case "$1" in
   restart)
     echo "Restarting Resque scheduler ... "
     stop
-    sleep 2
     start
     ;;
   *)

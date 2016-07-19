@@ -13,55 +13,62 @@ start() {
   local program
   local options
 
-  echo "Starting KEWatcher"
   if [ -e $KEWATCHER_PIDFILE ] && kill -0 `cat $KEWATCHER_PIDFILE` > /dev/null 2>&1; then
     echo "KEWatcher is already Running"
-    echo_success
     return 0
   fi
 
+  cd $ROOT_PATH
+
+  env_vars="RAILS_ENV=$RAILS_ENV"
   options="-m $KEWATCHER_MAX_WORKERS -c $KEWATCHER_REDIS_CONFIG -p $KEWATCHER_PIDFILE $KEWATCHER_VERBOSE"
+  program="source /home/$APP_USER/.bash_profile; $env_vars bundle exec $ROOT_PATH/bin/kewatcher $options 2>&1 >> $KEWATCHER_LOGFILE &"
 
-  su $APP_USER -c "cd $ROOT_PATH; source /home/$APP_USER/.bash_profile; RAILS_ENV=$RAILS_ENV nohup bundle exec $ROOT_PATH/bin/kewatcher $options 2>&1 >> $KEWATCHER_LOGFILE &"
-  RETVAL=$?
+  action 'Starting KEWatcher...' daemon --user "${APP_USER#$USER}" --pidfile=$KEWATCHER_PIDFILE $program
 
+  # workaround to allow KEWatcher to setup a trap for HUP signal
   sleep 5
-
-  if [ $RETVAL -eq 0 ]; then
-    echo_success
-  else
-    echo_failure
-  fi
-  echo
 }
 
 stop() {
-  echo "Stopping KEWatcher"
-
   if [ -f $KEWATCHER_PIDFILE ]; then
-    kill -s QUIT $(cat $KEWATCHER_PIDFILE)
-    RETVAL=$?
-    sleep 10
-  else
-    RETVAL=1
-  fi
+    # The idea is to let KEWatcher to gracefully stop,
+    # wait with delay gives us dynamic wait interval
+    # limited by N tries.
 
-  echo "Killing stuck workers"
-  kill -s KILL `pgrep -xf "[r]esque-[0-9]+.*" | xargs` > /dev/null 2>&1
-
-  if [ $RETVAL -eq 0 ]; then
-    rm -f $KEWATCHER_PIDFILE
+    action 'Stopping KEWatcher...' _stop_with_wait $(cat $KEWATCHER_PIDFILE)
   else
     echo "Resque KEWatcher is not running"
   fi
-  echo_success
+
+  echo 'Killing stuck workers...'
+  kill -s KILL `pgrep -xf "[r]esque-[0-9]+.*" | xargs` > /dev/null 2>&1
+
+  rm -f $KEWATCHER_PIDFILE
+}
+
+_stop_with_wait() {
+  local pid delay tries try
+
+  delay=10
+  tries=3
+  pid=$1
+  try=0
+
+  kill -s QUIT $pid
+
+  while [ $try -lt $tries ] ; do
+    checkpid $pid || return 0
+    sleep $delay
+    let try+=1
+  done
 }
 
 case "$1" in
   start) start ;;
   stop) stop ;;
   restart)
-    echo "Restarting Resque KEWatcher ... "
+    echo "Restarting Resque KEWatcher..."
     stop
     start
     ;;

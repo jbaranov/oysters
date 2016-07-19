@@ -16,54 +16,55 @@ start() {
 
   cd $ROOT_PATH
 
-  echo "Starting Unicorn"
   env_vars="RAILS_ENV=$RAILS_ENV BUNDLE_GEMFILE=$BUNDLE_GEMFILE"
   options="-c $UNICORN_CONFIG -E $RAILS_ENV -D "
   program="source /home/$APP_USER/.bash_profile; $env_vars bundle exec unicorn $options"
 
-  if [[ $APP_USER == $USER ]]
-  then
-    daemon --pidfile=$UNICORN_PIDFILE $program
-  else
-    daemon --user $APP_USER --pidfile=$UNICORN_PIDFILE $program
-  fi
-  RETVAL=$?
-
-  if [ $RETVAL -eq 0 ]; then
-    echo_success
-  else
-    echo_failure
-  fi
-  echo
+  action 'Starting Unicorn...' daemon --user "${APP_USER#$USER}" --pidfile=$UNICORN_PIDFILE $program
 }
 
 stop() {
-  echo "Stopping Unicorn"
+  local unicorn_pid
 
-  if [ -f $UNICORN_PIDFILE ]; then
-    kill -s QUIT $(cat $UNICORN_PIDFILE)
-    RETVAL=$?
-  else
-    RETVAL=1
-  fi
+  unicorn_pid=$(cat $UNICORN_PIDFILE)
 
-  if [ $RETVAL -eq 0 ]; then
-    rm -f $UNICORN_PIDFILE
+  if checkpid $unicorn_pid ; then
+    action 'Stopping Unicorn...' kill -s QUIT $unicorn_pid
   else
     echo "Unicorn is not running"
   fi
-  echo_success
+}
+
+restart() {
+  local unicorn_pid restart_sleep
+
+  restart_sleep=5
+
+  echo "Restarting Unicorn..."
+
+  if [ -f $UNICORN_PIDFILE ]; then
+    unicorn_pid=$(cat $UNICORN_PIDFILE)
+
+    action 'Clonning Master...' kill -s USR2 $unicorn_pid
+
+    [ "${?}" -ne 0 ] && return $?
+
+    sleep $restart_sleep
+
+    if checkpid $unicorn_pid ; then
+      action 'Killing old Master...' kill -s QUIT $unicorn_pid
+    fi
+  else
+    echo "Unicorn is not running"
+    start
+    return $?
+  fi
 }
 
 case "$1" in
   start) start ;;
   stop) stop ;;
-  restart)
-    echo "Restarting Unicorn ... "
-    stop
-    sleep 5
-    start
-    ;;
+  restart) restart ;;
   *)
     echo "Usage: $0 {start|stop|restart}"
     exit 1
